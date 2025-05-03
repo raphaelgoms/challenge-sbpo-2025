@@ -9,7 +9,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 public class ChallengeSolver {
-    private final long MAX_RUNTIME = 600000; // milliseconds; 10 minutes
+    private final long MAX_RUNTIME = 60000; // milliseconds; 10 minutes
 
     protected List<Map<Integer, Integer>> orders;
     protected List<Map<Integer, Integer>> aisles;
@@ -27,9 +27,14 @@ public class ChallengeSolver {
     }
 
     public ChallengeSolution solve(StopWatch stopWatch) {
-        // Implement your solution here
-        return null;
+        int maxIterations = 10000; // ou calcule com base no tempo disponível
+        GraspSolver grasp = new GraspSolver(
+            orders, aisles, nItems, waveSizeLB, waveSizeUB,
+            maxIterations, MAX_RUNTIME
+        );
+        return grasp.run(stopWatch);
     }
+
 
     /*
      * Get the remaining time in seconds

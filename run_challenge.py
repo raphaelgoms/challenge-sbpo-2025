@@ -29,7 +29,7 @@ def compile_code(source_folder):
 
     if result.returncode != 0:
         print("Maven compilation failed:")
-        print(result.stderr)
+        print(result)
         return False
 
     print("Maven compilation successful.")
@@ -56,8 +56,14 @@ def run_benchmark(source_folder, input_folder, output_folder):
 
     # Get the path to the JAR file
     jar_path = os.path.join(source_folder, "target", "ChallengeSBPO2025-1.0.jar")
-
-    for filename in os.listdir(input_folder):
+    #print(os.listdir(input_folder))
+    #exit(0)
+    f = 0
+    nfiles = 4 
+    for filename in sorted(os.listdir(input_folder)):
+        if f >= nfiles:
+            exit(0)
+        f+=1
         if filename.endswith(".txt"):
             print(f"Running {filename}")
             input_file = os.path.join(input_folder, filename)
