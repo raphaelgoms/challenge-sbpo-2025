@@ -40,7 +40,7 @@ public class GraspSolver {
             if (remaining <= 0) break;
 
             ChallengeSolution candidate = constructGreedyRandomizedSolution();
-            candidate = localSearch(candidate);
+            //candidate = localSearch(candidate);
             double score = evaluate(candidate);
 
             if (score > bestScore) {
@@ -61,66 +61,134 @@ public class GraspSolver {
                 0);
     }
 
-private ChallengeSolution constructGreedyRandomizedSolution() {
-    Random rand = new Random();
-    List<Integer> allOrderIndices = new ArrayList<>();
-    for (int i = 0; i < orders.size(); i++) {
-        allOrderIndices.add(i);
-    }
+    private List<Integer> buildRCL(Map<Integer, Double> orderScores, List<Integer> sortedOrders, double alpha) {
+        List<Integer> rcl = new ArrayList<>();
+        if (sortedOrders.isEmpty()) return rcl;
 
-    Collections.shuffle(allOrderIndices, rand);
+        double bestScore = orderScores.get(sortedOrders.get(0));
+        double worstScore = orderScores.get(sortedOrders.get(sortedOrders.size() - 1));
+        double threshold = bestScore - alpha * (bestScore - worstScore);
 
-    Set<Integer> selectedOrders = new HashSet<>();
-    Map<Integer, Integer> totalDemand = new HashMap<>(); // item -> quantidade acumulada
-
-    for (int orderId : allOrderIndices) {
-        if (selectedOrders.size() >= waveSizeUB) break;
-
-        Map<Integer, Integer> order = orders.get(orderId);
-
-        // Verifica se adicionar esse pedido ultrapassa a capacidade disponível
-        boolean feasible = true;
-        for (Map.Entry<Integer, Integer> entry : order.entrySet()) {
-            int itemId = entry.getKey();
-            int quantity = entry.getValue();
-
-            int currentDemand = totalDemand.getOrDefault(itemId, 0);
-            int available = totalItemAvailability(itemId);
-
-            if (currentDemand + quantity > available) {
-                feasible = false;
-                break;
+        for (int orderId : sortedOrders) {
+            double score = orderScores.get(orderId);
+            if (score >= threshold) {
+                rcl.add(orderId);
+            } else {
+                break; // lista está ordenada decrescentemente
             }
         }
 
-        if (!feasible) continue;
-
-        // Se for viável, adiciona o pedido e atualiza a demanda
-        selectedOrders.add(orderId);
-        for (Map.Entry<Integer, Integer> entry : order.entrySet()) {
-            int itemId = entry.getKey();
-            int quantity = entry.getValue();
-            totalDemand.put(itemId, totalDemand.getOrDefault(itemId, 0) + quantity);
-        }
-
-        //if (selectedOrders.size() >= waveSizeLB && rand.nextDouble() < 0.5) break;
+        return rcl;
     }
 
-    // Calcula os corredores com base nos pedidos selecionados
-    Set<Integer> selectedAisles = new HashSet<>();
-    for (int orderId : selectedOrders) {
-        Map<Integer, Integer> order = orders.get(orderId);
-        for (int itemId : order.keySet()) {
-            for (int aisleId = 0; aisleId < aisles.size(); aisleId++) {
-                if (aisles.get(aisleId).containsKey(itemId)) {
-                    selectedAisles.add(aisleId);
+    private ChallengeSolution constructGreedyRandomizedSolution() {
+        Random rand = new Random();
+
+        List<Integer> allOrderIndices = new ArrayList<>();
+        for (int i = 0; i < orders.size(); i++) {
+            allOrderIndices.add(i);
+        }
+
+        Collections.shuffle(allOrderIndices, rand);
+
+        Set<Integer> selectedOrders = new HashSet<>();
+        Map<Integer, Integer> totalDemand = new HashMap<>(); // itemId -> total solicitado até agora
+
+        // Pré-computa o total disponível por item em todos os corredores
+        Map<Integer, Integer> totalAvailable = computeTotalAvailability();
+
+        for (int orderId : allOrderIndices) {
+            if (selectedOrders.size() >= waveSizeUB) break;
+
+            Map<Integer, Integer> order = orders.get(orderId);
+
+            boolean feasible = true;
+            for (Map.Entry<Integer, Integer> entry : order.entrySet()) {
+                int itemId = entry.getKey();
+                int quantity = entry.getValue();
+                int currentDemand = totalDemand.getOrDefault(itemId, 0);
+                int available = totalAvailable.getOrDefault(itemId, 0);
+
+                if (currentDemand + quantity > available) {
+                    feasible = false;
+                    break;
                 }
             }
+
+            if (!feasible) continue;
+
+            // Atualiza a seleção
+            selectedOrders.add(orderId);
+            for (Map.Entry<Integer, Integer> entry : order.entrySet()) {
+                int itemId = entry.getKey();
+                int quantity = entry.getValue();
+                totalDemand.put(itemId, totalDemand.getOrDefault(itemId, 0) + quantity);
+            }
+
+            if (selectedOrders.size() >= waveSizeLB && rand.nextDouble() < 0.5) break;
         }
+
+        Set<Integer> selectedAisles = selectAislesForItems(totalDemand);
+
+        return new ChallengeSolution(selectedOrders, selectedAisles);
     }
 
-    return new ChallengeSolution(selectedOrders, selectedAisles);
-}
+    private float evaluateOrder(Map<int, int> order) {
+        
+        float totalDemand = 0;
+        int neeedAisles = 0;
+        
+        for (Map.Entry<Integer, Integer> entry : order.entrySet()) {
+            int itemId = entry.getKey();
+            int quantity = entry.getValue();
+
+            totalDemand += quantity;
+            neeedAisles += countAislesForItem(itemId, quantity); 
+        }
+
+        if (neeedAisles == 0) return 0;
+
+        return totalDemand / neeedAisles;
+    }
+
+    private int countAislesForItem(int item, int quantity) {
+        // Lista de estoques disponíveis do item nos corredores
+        List<Integer> availablePerAisle = new ArrayList<>();
+
+        for (Map<Integer, Integer> aisle : aisles) {
+            int available = aisle.getOrDefault(item, 0);
+            if (available > 0) {
+                availablePerAisle.add(available);
+            }
+        }
+
+        // Ordena em ordem decrescente para usar os corredores com mais estoque primeiro
+        availablePerAisle.sort(Collections.reverseOrder());
+
+        int remaining = quantity;
+        int usedAisles = 0;
+
+        for (int stock : availablePerAisle) {
+            remaining -= stock;
+            usedAisles++;
+            if (remaining <= 0) break;
+        }
+
+        return remaining > 0 ? Integer.MAX_VALUE : usedAisles;
+    }
+
+    private Map<Integer, Integer> computeTotalAvailability() {
+        Map<Integer, Integer> availability = new HashMap<>();
+        for (Map<Integer, Integer> aisle : aisles) {
+            for (Map.Entry<Integer, Integer> entry : aisle.entrySet()) {
+                int itemId = entry.getKey();
+                int quantity = entry.getValue();
+                availability.put(itemId, availability.getOrDefault(itemId, 0) + quantity);
+            }
+        }
+        return availability;
+    }
+
 
     private int totalItemAvailability(int itemId) {
         int total = 0;
